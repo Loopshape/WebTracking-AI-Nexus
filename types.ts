@@ -6,6 +6,10 @@ export interface TrackingNode {
   type: 'ROOT' | 'HASH' | 'IP' | 'RELAY' | 'SERVER' | 'NFT';
   status: 'active' | 'idle' | 'analyzing' | 'secure';
   value?: string;
+  ownership_status?: 'owned' | 'transferable' | 'minting';
+  contract_address?: string;
+  trafficLoad?: 'low' | 'medium' | 'high';
+  location?: string;
 }
 
 export interface AnalysisResult {
