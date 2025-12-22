@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { TrackingNode } from '../types';
 import { INITIAL_NODES } from '../constants';
-import { Globe, X, Server, Database, Key, Shield } from 'lucide-react';
+import { Globe, X, Server, Database, Key, Shield, Zap } from 'lucide-react';
+import { analyzeTrackingData } from '../services/geminiService';
 
 const MOCK_LOCATIONS = [
   "US, Virginia", "DE, Frankfurt", "SG, Singapore", "JP, Tokyo", "GB, London", "BR, Sao Paulo", "CA, Toronto", "NL, Amsterdam"
@@ -19,11 +20,88 @@ const getHexagonPoints = (cx: number, cy: number, r: number) => {
   return points.join(" ");
 };
 
+const getCountryFlag = (loc?: string) => {
+  if (!loc) return null;
+  const code = loc.split(',')[0].trim();
+  const flags: Record<string, string> = {
+    'US': '🇺🇸', 'DE': '🇩🇪', 'SG': '🇸🇬', 'JP': '🇯🇵',
+    'GB': '🇬🇧', 'BR': '🇧🇷', 'CA': '🇨🇦', 'NL': '🇳🇱'
+  };
+  return flags[code] || '🏳️';
+};
+
 const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
   const [nodes, setNodes] = useState<TrackingNode[]>(INITIAL_NODES as TrackingNode[]);
   const [pulses, setPulses] = useState<{ id: number; x: number; y: number }[]>([]);
   const [selectedNode, setSelectedNode] = useState<TrackingNode | null>(null);
+  const [aiTheme, setAiTheme] = useState<{ color: string, speed: string, mood: string }>({ 
+    color: '#00f3ff', 
+    speed: '1.5s',
+    mood: 'DEFAULT'
+  });
+  
+  const nodesRef = useRef(nodes);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Keep ref in sync for interval
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  // Periodic AI Analysis of Graph State
+  useEffect(() => {
+    if (!active) return;
+
+    const performVisualAnalysis = async () => {
+      // Snapshot current state for the AI
+      const snapshot = nodesRef.current.map(n => 
+        `[${n.type}]: ${n.status} (Load: ${n.trafficLoad || 'N/A'})`
+      ).join(' | ');
+
+      const prompt = `Analyze this network graph state to determine visual ambiance. 
+      State: ${snapshot}. 
+      Return 'focus' (e.g., ALERT, STABLE, QUANTUM) and 'spectrum' to influence UI colors/speed.`;
+
+      try {
+        const result = await analyzeTrackingData(prompt);
+        if (result) {
+          let newColor = '#00f3ff'; // Default Neon Blue
+          let newSpeed = '1.5s';
+          
+          // Map Focus/Analysis to Color Theme
+          const focus = (result.focus || '').toUpperCase();
+          const spectrum = (result.spectrum || '').toUpperCase();
+          
+          if (focus.includes('ALERT') || spectrum.includes('RED') || spectrum.includes('CRITICAL')) {
+            newColor = '#ff003c'; // Neon Red
+          } else if (focus.includes('SECURE') || focus.includes('STABLE') || spectrum.includes('GREEN')) {
+            newColor = '#00ff41'; // Neon Green
+          } else if (focus.includes('QUANTUM') || focus.includes('DEFINE') || spectrum.includes('PURPLE')) {
+            newColor = '#d946ef'; // Fuchsia/Purple
+          } else if (focus.includes('DATA') || focus.includes('SORT') || spectrum.includes('YELLOW')) {
+            newColor = '#facc15'; // Yellow
+          }
+
+          // Map Quantity to Animation Speed
+          if (result.quantity > 80) newSpeed = '0.5s'; // Hyper fast
+          else if (result.quantity > 50) newSpeed = '1.0s'; // Normal
+          else newSpeed = '3.0s'; // Slow/Idle
+
+          setAiTheme({
+            color: newColor,
+            speed: newSpeed,
+            mood: focus
+          });
+        }
+      } catch (e) {
+        console.error("Graph analysis failed", e);
+      }
+    };
+
+    // Run every 10 seconds
+    const intervalId = setInterval(performVisualAnalysis, 10000);
+    return () => clearInterval(intervalId);
+  }, [active]);
 
   // Initialize: Simulate GeoIP Lookup
   useEffect(() => {
@@ -123,7 +201,7 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
 
   const getFlowColor = (status: string) => {
     switch (status) {
-      case 'active': return '#00f3ff'; // Neon Blue
+      case 'active': return aiTheme.color; // Dynamic Theme Color
       case 'secure': return '#00ff41'; // Neon Green
       case 'analyzing': return '#facc15'; // Yellow
       case 'idle': return '#475569'; // Slate
@@ -152,8 +230,14 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
 
   return (
     <div className="relative w-full h-96 bg-deep-space border border-slate-700 rounded-lg overflow-hidden shadow-lg grid-bg">
-      <div className="absolute top-2 left-2 text-neon-blue text-xs font-mono z-10 select-none">
+      <div className="absolute top-2 left-2 text-neon-blue text-xs font-mono z-10 select-none flex items-center gap-2">
         <span className="animate-pulse">●</span> LIVE TRACKING // NETWORK FLOW
+        {aiTheme.mood !== 'DEFAULT' && (
+           <span className="text-[10px] text-slate-400 flex items-center gap-1 border-l border-slate-700 pl-2">
+             <Zap className="w-3 h-3" style={{ color: aiTheme.color }} />
+             AI_MOD: {aiTheme.mood}
+           </span>
+        )}
       </div>
       
       {/* Details Panel Overlay */}
@@ -216,8 +300,8 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
 
       <svg ref={svgRef} className="w-full h-full cursor-crosshair" viewBox="0 0 100 100" preserveAspectRatio="none" onClick={() => setSelectedNode(null)}>
         <defs>
-          <marker id="arrowhead-blue" markerWidth="6" markerHeight="4" refX="8" refY="2" orient="auto">
-            <polygon points="0 0, 6 2, 0 4" fill="#00f3ff" />
+          <marker id="arrowhead-dynamic" markerWidth="6" markerHeight="4" refX="8" refY="2" orient="auto">
+            <polygon points="0 0, 6 2, 0 4" fill={aiTheme.color} />
           </marker>
           <marker id="arrowhead-green" markerWidth="6" markerHeight="4" refX="8" refY="2" orient="auto">
             <polygon points="0 0, 6 2, 0 4" fill="#00ff41" />
@@ -246,7 +330,7 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
           const isIdle = next.status === 'idle';
           
           let markerId = "arrowhead-slate";
-          if (next.status === 'active') markerId = "arrowhead-blue";
+          if (next.status === 'active') markerId = "arrowhead-dynamic";
           if (next.status === 'secure') markerId = "arrowhead-green";
           if (next.status === 'analyzing') markerId = "arrowhead-yellow";
           
@@ -276,7 +360,7 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
                     attributeName="stroke-dashoffset" 
                     from="20" 
                     to="0" 
-                    dur={next.status === 'analyzing' ? "0.5s" : "1.5s"} 
+                    dur={aiTheme.speed} 
                     repeatCount="indefinite" 
                   />
                 </line>
@@ -314,19 +398,27 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
                   x={node.x - 4} y={node.y - 4} 
                   width="8" height="8" 
                   fill="#050b14" 
-                  stroke={node.status === 'active' ? '#00f3ff' : node.status === 'analyzing' ? '#facc15' : '#475569'}
+                  stroke={node.status === 'active' ? aiTheme.color : node.status === 'analyzing' ? '#facc15' : '#475569'}
                   strokeWidth="0.5"
                   rx="1"
                 />
                 <path d={`M${node.x-2} ${node.y} h4 M${node.x} ${node.y-2} v4`} stroke="#1e293b" strokeWidth="0.5" />
-                <circle cx={node.x + 2.5} cy={node.y - 2.5} r="0.8" fill={node.status === 'active' ? '#00f3ff' : '#1e293b'}>
+                <circle cx={node.x + 2.5} cy={node.y - 2.5} r="0.8" fill={node.status === 'active' ? aiTheme.color : '#1e293b'}>
                    {node.status === 'active' && <animate attributeName="opacity" values="1;0.2;1" dur="1s" repeatCount="indefinite" />}
                 </circle>
                 <text x={node.x} y={node.y + 6} fill="#94a3b8" fontSize="1.8" fontFamily="monospace" textAnchor="middle">::IP::</text>
+                
                 {/* GeoIP Location Display */}
                 <text x={node.x} y={node.y + 8} fill="#475569" fontSize="1.2" fontFamily="monospace" textAnchor="middle">
                   {node.location || 'LOCATING...'}
                 </text>
+                
+                {/* Flag Icon */}
+                {node.location && getCountryFlag(node.location) && (
+                  <text x={node.x + 4} y={node.y - 3} fontSize="3" textAnchor="middle">
+                    {getCountryFlag(node.location)}
+                  </text>
+                )}
               </g>
             )}
 
@@ -359,6 +451,16 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
                 <text x={node.x} y={node.y + 6} fill={node.status === 'secure' ? '#00ff41' : '#facc15'} fontSize="1.8" fontFamily="monospace" textAnchor="middle">
                    {node.status === 'secure' ? '[VERIFIED]' : '[HASHING]'}
                 </text>
+
+                {/* Verified Origin Badge for Hash */}
+                {node.status === 'secure' && (
+                  <g>
+                    {/* Small badge background */}
+                    <circle cx={node.x + 3.5} cy={node.y - 3.5} r="1.5" fill="#00ff41" stroke="#050b14" strokeWidth="0.2" />
+                    {/* Checkmark */}
+                    <path d={`M${node.x + 2.8} ${node.y - 3.5} l0.5 0.5 l1.0 -1.0`} stroke="#050b14" strokeWidth="0.4" fill="none" />
+                  </g>
+                )}
               </g>
             )}
 
@@ -393,9 +495,9 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
             {/* --- GENERIC NODE (ROOT, SERVER, RELAY) --- */}
             {['ROOT', 'SERVER', 'RELAY'].includes(node.type) && (
               <g>
-                <circle cx={node.x} cy={node.y} r="2" fill="#050b14" stroke={node.type === 'ROOT' ? '#ef4444' : '#00f3ff'} strokeWidth="0.5" />
+                <circle cx={node.x} cy={node.y} r="2" fill="#050b14" stroke={node.type === 'ROOT' ? '#ef4444' : aiTheme.color} strokeWidth="0.5" />
                 {node.status === 'active' && (
-                   <circle cx={node.x} cy={node.y} r="3" fill="none" stroke={node.type === 'ROOT' ? '#ef4444' : '#00f3ff'} strokeWidth="0.2" opacity="0.5">
+                   <circle cx={node.x} cy={node.y} r="3" fill="none" stroke={node.type === 'ROOT' ? '#ef4444' : aiTheme.color} strokeWidth="0.2" opacity="0.5">
                      <animate attributeName="r" values="2;4;2" dur="2s" repeatCount="indefinite" />
                      <animate attributeName="opacity" values="0.8;0;0.8" dur="2s" repeatCount="indefinite" />
                    </circle>
@@ -410,7 +512,7 @@ const TrackingGraph: React.FC<{ active: boolean }> = ({ active }) => {
 
         {/* Labels */}
         <text x="5" y="50" fill="#00ff41" fontSize="2.5" fontWeight="bold">ROOT</text>
-        <text x="50" y="5" fill="#00f3ff" fontSize="2.5" fontWeight="bold">SERVER</text>
+        <text x="50" y="5" fill={aiTheme.color} fontSize="2.5" fontWeight="bold">SERVER</text>
         <text x="95" y="50" fill="#00ff41" fontSize="2.5" fontWeight="bold">KEY</text>
         <text x="50" y="95" fill="#ef4444" fontSize="2.5" fontWeight="bold">DATA</text>
 
